@@ -1,6 +1,8 @@
 # Downloaded model weights (large, not checked in)
 protvs/checkpoint/
 protvs/vae/
+proticelli/checkpoint/
+proticelli/vae/
 
 # Python
 __pycache__/
@@ -27,3 +29,6 @@ Thumbs.db
 *.tif
 *.tiff
 *.npy
+
+# Personal testing notebook
+tl_sandbox.ipynb
