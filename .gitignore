@@ -32,3 +32,6 @@ Thumbs.db
 
 # Personal testing notebook
 tl_sandbox.ipynb
+
+# Input validation report
+*validation_report.csv
