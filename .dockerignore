@@ -1,0 +1,12 @@
+quickstart.ipynb
+example_cell_reference_input/
+test_cell_reference_input/
+**/*.tif
+**/*.tiff
+**/*.npy
+**/checkpoint/
+**/vae/
+predictions/
+*.csv
+__pycache__/
+.git/
