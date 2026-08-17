@@ -29,6 +29,7 @@ Thumbs.db
 *.tif
 *.tiff
 *.npy
+predictions/
 
 # Personal testing notebook
 tl_sandbox.ipynb
