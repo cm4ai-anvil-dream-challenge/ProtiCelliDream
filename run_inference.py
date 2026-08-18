@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument("--checkpoint_zip", required=True, help="file:// or https:// URL")
     parser.add_argument("--vae_zip", required=True, help="file:// or https:// URL")
     parser.add_argument("--image_dir", required=True, help="Directory containing reference images")
-    parser.add_argument("--image_files", nargs="+", required=True, help="Filenames within image_dir to use")
+    parser.add_argument("--image_files", nargs="+", default=None, help="Filenames within image_dir. If omitted, uses all files in image_dir.")
     parser.add_argument("--proteins", nargs="+", required=True)
     parser.add_argument("--cell_lines", nargs="+", required=True)
     parser.add_argument("--num_inference_steps", type=int, default=50)
@@ -33,7 +33,17 @@ def parse_args():
 def main():
     args = parse_args()
 
-    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    run_id = uuid.uuid4().hex[:8]
+    output_dir = Path(args.output_dir) / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+
+    if args.image_files is None:
+        valid_extensions = {".tif", ".tiff"}
+        args.image_files = sorted(
+            f.name for f in Path(args.image_dir).iterdir()
+            if f.is_file() and f.suffix.lower() in valid_extensions
+        )
 
     paths = Model.download_checkpoints(
         checkpoint_url=args.checkpoint_zip,
@@ -45,7 +55,7 @@ def main():
         filenames=args.image_files,
         data_dir=args.image_dir,
         expected_range=tuple(args.expected_range),
-        csv_path=str(Path(args.output_dir) / "validation_report.csv"),
+        csv_path=str(Path(output_dir) / "validation_report.csv"),
         only_issues_to_csv=False,
     )
     passed_filenames = report[report["passed"] == True]["filename"].tolist()
@@ -91,11 +101,6 @@ def main():
             f"got {actual}"
         )
 
-    # TL - you are here!
-    run_id = uuid.uuid4().hex[:8]
-    output_dir = Path(args.output_dir) / run_id
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
     manifest_rows = []
     for ref_fn, cell_line, protein, img in zip(ref_filenames_out, cell_line_names, protein_names, results.images):
         ref_stem = Path(ref_fn).stem
