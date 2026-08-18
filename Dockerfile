@@ -11,5 +11,5 @@ RUN pip install --no-cache-dir .
 # Now copy the actual code
 COPY proticelli/ ./proticelli/
 COPY pipeline_checks.py .
-
-CMD ["python3", "-c", "print('ProtiCelli image built successfully')"]
+COPY run_inference.py .
+CMD ["python3", "run_inference.py"]
