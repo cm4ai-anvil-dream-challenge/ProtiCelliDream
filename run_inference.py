@@ -58,6 +58,12 @@ def main():
         csv_path=str(Path(output_dir) / "validation_report.csv"),
         only_issues_to_csv=False,
     )
+
+    # Add run context to the validation_report
+    report["run_id"] = run_id
+    report["image_dir"] = args.image_dir
+    report.to_csv(Path(output_dir) / "validation_report.csv", index=False)
+
     passed_filenames = report[report["passed"] == True]["filename"].tolist()
 
     if len(passed_filenames) != len(ref_images):
