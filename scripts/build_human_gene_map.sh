@@ -7,24 +7,13 @@
 # protein_predictor.py's MAPPING_BACKEND=local. Replaces per-sequence
 # mygene.info calls with an in-memory dict lookup.
 #
-# NOTE: like build_human_blast_db.sh, the download step below has not
-# been run or verified end to end (no uniprot.org access from where this
-# was written). It requests xref_ensembl_full rather than xref_ensembl,
-# since UniProt's documented field convention is that cross-reference
-# fields have a short form and a "_full" form with more detail (e.g.
-# xref_pdb vs xref_pdb_full), and the short form was confirmed (against a
-# real download) to omit the Ensembl gene id entirely, only transcript
-# ids and isoform notation. xref_ensembl_full is the best current guess
-# based on that convention, not a confirmed field. The parsing step
-# deliberately does NOT assume an exact field format either way, it just
-# extracts every ENSG-prefixed token found via regex, so it should work
-# regardless of exactly how the "_full" variant punctuates things, AS
-# LONG AS an ENSG token is actually present somewhere in it. If the row
-# count or "rows with gene" count below still comes back at 0, the
-# fallback worth trying next is UniProt's dedicated ID Mapping REST
-# service (UniProtKB_AC-ID -> Ensembl, in bulk), a different endpoint
-# built specifically for this kind of mapping rather than a general
-# record export.
+# Requests xref_ensembl_full rather than xref_ensembl: the short form
+# omits Ensembl gene ids (ENSG), listing only transcripts and isoforms.
+# The parser extracts every ENSG token by regex rather than assuming an
+# exact field format.
+#
+# The UniProt release is taken from the X-UniProt-Release and
+# X-UniProt-Release-Date response headers of the download itself.
 #
 # Usage:
 #   ./build_human_gene_map.sh [output_dir]
@@ -37,9 +26,10 @@ mkdir -p "$OUT_DIR"
 RAW_TSV_GZ="$OUT_DIR/human_reviewed_ensembl_raw.tsv.gz"
 RAW_TSV="$OUT_DIR/human_reviewed_ensembl_raw.tsv"
 MAP_TSV="$OUT_DIR/human_gene_map.tsv"
+HEADERS="$OUT_DIR/download_headers.txt"
 
 echo "Downloading reviewed human UniProt accession -> symbol -> Ensembl cross-references..."
-curl -sS -o "$RAW_TSV_GZ" \
+curl -sS -D "$HEADERS" -o "$RAW_TSV_GZ" \
   "https://rest.uniprot.org/uniprotkb/stream?query=%28organism_id%3A9606%29%20AND%20%28reviewed%3Atrue%29&fields=accession%2Cgene_primary%2Cxref_ensembl_full&format=tsv&compressed=true"
 
 echo "Decompressing..."
@@ -89,6 +79,7 @@ PROVENANCE_FILE="$OUT_DIR/PROVENANCE.txt"
   echo "Generated (UTC): $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   echo "Source query URL: https://rest.uniprot.org/uniprotkb/stream?query=%28organism_id%3A9606%29%20AND%20%28reviewed%3Atrue%29&fields=accession%2Cgene_primary%2Cxref_ensembl_full&format=tsv&compressed=true"
   echo "Accession rows downloaded: $ROW_COUNT"
+  grep -i '^x-uniprot-release' "$HEADERS" | tr -d '\r' || echo "UniProt release: not reported in response headers"
 } > "$PROVENANCE_FILE"
 echo "Wrote provenance to $PROVENANCE_FILE"
 
@@ -97,6 +88,4 @@ ZIP_FILE="$OUT_DIR/human_gene_map.zip"
 echo "Wrote $ZIP_FILE"
 
 echo ""
-echo "Done. To use this map with protein_predictor.py:"
-echo "  export MAPPING_BACKEND=local"
-echo "  export LOCAL_GENE_MAP=$MAP_TSV"
+echo "Done. Package $ZIP_FILE into the weights file with scripts/build_weights_zip.sh."
