@@ -16,6 +16,7 @@ This repository is a fork of ProtiCelli, developed by the Lundberg lab. The orig
 | Path | Purpose |
 |---|---|
 | `run_inference.py` | Runs the full pipeline over a set of input records |
+| `Dockerfile` | Inference image: BLAST+, the ProtiCelli package, and the pipeline scripts |
 | `protein_predictor.py` | Amino acid sequence to UniProt accession, Ensembl gene ID, and HGNC symbol |
 | `pipeline_checks.py` | Channel assembly and optional input validation |
 | `scripts/manifest_to_json.py` | Converts a manifest TSV into the input JSON |
@@ -98,6 +99,28 @@ Optional arguments:
 
 Weights always extract to a run-local directory, never into the installed `proticelli` package, so each run uses the weights file it was given. Any `LOCAL_BLAST_DB` or `LOCAL_GENE_MAP` environment variables left over from development are ignored for the same reason.
 
+### In Docker
+
+The image holds code only (Python 3.11, BLAST+ 2.17.0, the ProtiCelli package, and the pipeline scripts in `/app`); weights and reference data arrive at runtime in the weights file. Build for x86_64, which Terra uses, including on Apple Silicon:
+
+```bash
+docker buildx build --platform linux/amd64 -t blast-proticelli:0.1.0 --load .
+```
+
+The build fails if the ProtiCelli vocabulary files are missing from the installed package, if `blastp` cannot run, or if the pipeline imports fail.
+
+To test locally, mount the working directory at the same path so absolute paths in `inputs.json` still resolve, and extract weights inside the container:
+
+```bash
+docker run --rm --platform linux/amd64 -v "$PWD":"$PWD" -w "$PWD" blast-proticelli:0.1.0 \
+  python /app/run_inference.py --inputs inputs.json \
+  --weights_zip blast_proticelli_weights_v2.zip \
+  --weights_dir /tmp/weights --reference_data_dir /tmp/reference_data \
+  --output_dir predictions/docker
+```
+
+On a Mac this runs under emulation on the CPU and is slow; `--num_inference_steps 10` is useful for a quick functional test, though fewer steps give visibly rougher images.
+
 ## Outputs
 
 All outputs are written flat into `--output_dir`:
@@ -154,14 +177,15 @@ The script prints the top-level contents and the SHA-256 checksum. Record every 
 
 | Version | Built | UniProt release (date) | ProtiCelli weights | SHA-256 | Location | Notes |
 |---|---|---|---|---|---|---|
-| v1 | 2026-09-28 | 2026_03 (2026-09-02), inferred |  Lundberg lab default `download_checkpoints()` URLs | `19fc815a99449e80eb2c703602aa58a5c92103225efb8203dca738b9cd9c0566` | TBD | Verified end to end on two test records. Includes ProtiCelli training state files (about 6.5 GB). UniProt release inferred: reference zips built 2026-09-23, when 2026_03 was current; not recorded by the v1 build scripts. |
-| v2 | 2026-09-28 | 2026_03 (2026-09-02) | Same as v1 | 2f243c8e0945b5b9830fafae1590c92638415501e7aa6c6db71da3161ed07071 | local only (not yet uploaded) | Training state removed. Otherwise same model weights as v1. |
+| v1 | 2026-09-28 | 2026_03 (2026-09-02), inferred |  Lundberg lab default `download_checkpoints()` URLs | `19fc815a99449e80eb2c703602aa58a5c92103225efb8203dca738b9cd9c0566` | local only (not yet uploaded) | Verified end to end on two test records. Includes ProtiCelli training state files (about 6.5 GB). UniProt release inferred: reference zips built 2026-09-23, when 2026_03 was current; not recorded by the v1 build scripts. |
+| v2 | 2026-09-28 | 2026_03 (2026-09-02) | Same as v1 | `2f243c8e0945b5b9830fafae1590c92638415501e7aa6c6db71da3161ed07071` | local only (not yet uploaded) | Training state removed, bringing the file to about 3.6 GB. Same model weights and reference zips as v1; outputs match v1 within MPS run-to-run noise. Verified in Docker. |
 
 ## Open items
 
-- **Output pixel value range.** Inputs are normalized to roughly [-1, 1.5], but observed outputs fall in [0, 0.04]. Pending clarification from the Lundberg lab.
+- **Input normalization and output rescaling.** The pipeline currently assumes inputs are already normalized for ProtiCelli, and writes predictions in ProtiCelli's native output range ([0, 1]). Once real challenge images are available, it needs a normalization step using ProtiCelli's own code, and a matching rescaling of outputs back to the input intensity scale. The rescaling cannot be designed with the current test images, since how they were scaled is unknown.
 - **EMA weights.** ProtiCelli's `Model.model` loads `checkpoint/unet` (`_load_model()` defaults to `use_ema=False`), while its fine-tuning path loads `checkpoint/unet_ema`, and its `download.py` docstring lists only `unet_ema`. EMA weights are commonly the ones used for sampling in diffusion models, so whether inference should use them is a question for the Lundberg lab. Both folders are kept until then; dropping the unused one would save a further 1.7 GB.
 - **Reproducibility on Apple GPUs.** With a fixed seed, repeated runs on MPS differ by up to about 0.05% of the output range. Whether CUDA runs on Terra are bit-identical is untested.
 - **Handling of skipped records.** Skipping out-of-vocabulary proteins and failing only on all-error runs are provisional choices; how skipped records are scored is a challenge design question.
 - **`cell_line`.** Currently a single optional value applied to every record in a run.
-- **Containerization and WDL.** Docker image and WDL workflow in progress.
+- **GPU driver on Terra.** The image's PyTorch is built for CUDA 13.0, which needs a recent NVIDIA driver (roughly 580 or newer). Terra's g2-standard-8 machines have NVIDIA L4 GPUs, which support it, but the driver version is set by the machine image and is unknown. With an older driver, PyTorch would silently fall back to the CPU. The first Terra run should confirm the device in use; if needed, pin PyTorch to a CUDA 12 build.
+- **WDL.** The workflow wrapper is the remaining step.
