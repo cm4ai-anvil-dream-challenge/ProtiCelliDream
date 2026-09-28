@@ -27,7 +27,7 @@ Thumbs.db
 
 # wdl related
 _LAST
-*_predict/
+20[0-9][0-9]*_*/
 
 # Outputs
 *.tif
