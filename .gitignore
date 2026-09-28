@@ -29,6 +29,8 @@ Thumbs.db
 # wdl related
 _LAST
 20[0-9][0-9]*_*/
+*_blast_proticelli/
+wdl_inputs.json
 
 # Outputs
 *.tif
