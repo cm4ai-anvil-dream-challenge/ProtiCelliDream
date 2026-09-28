@@ -45,6 +45,8 @@ human_blast_db/
 human_gene_map/
 reference_data/
 *.zip
+# Split test reference images: the only example inputs, tracked for testing
+!test_image_reference_input/*.tiff
 
 # Personal testing notebook
 tl_sandbox.ipynb
