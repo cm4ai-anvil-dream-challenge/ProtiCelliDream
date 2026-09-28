@@ -1,4 +1,4 @@
-i# BLAST-ProtiCelli baseline
+# BLAST-ProtiCelli baseline
 
 A baseline submission for the CM4AI DREAM Challenge on predicting protein subcellular localization. Given reference images of a cell (microtubules, nucleus, ER) and the amino acid sequence of a protein, it generates a predicted fluorescence image of where that protein localizes.
 
@@ -59,14 +59,19 @@ Relative paths in the manifest are resolved against the manifest's directory by 
 Everything the model needs at runtime ships in a single zip:
 
 ```
-blast_proticelli_weights_v1.zip
-    checkpoint/                     ProtiCelli model weights
+blast_proticelli_weights_v2.zip
+    checkpoint/unet/                ProtiCelli model weights (loaded for inference)
+    checkpoint/unet_ema/            ProtiCelli EMA weights (not currently loaded; see open items)
     vae/                            ProtiCelli VAE weights
     reference/human_blast_db.zip    BLAST database
     reference/human_gene_map.zip    UniProt to Ensembl and HGNC map
 ```
 
-The BLAST database and gene map are packaged with the model weights because they define which proteins this baseline can recognize, in the same way ProtiCelli's weights and vocabulary do. Each reference zip contains a `PROVENANCE.txt` recording its UniProt query, build date, and (from v2 on) the UniProt release it was downloaded from.
+ProtiCelli's training state (`optimizer.bin`, `scheduler.bin`, `random_states_*.pkl`) is not included. Inference does not read it, and leaving it out removes about 3.5 GB; outputs with and without it differ only by run-to-run GPU noise.
+
+`run_inference.py` checks that `checkpoint/unet/` exists before predicting. Without it, ProtiCelli silently falls back to a randomly initialized model and still writes images, so a malformed weights file would otherwise produce plausible-looking but meaningless predictions.
+
+The BLAST database and gene map are packaged with the model weights because they define which proteins this baseline can recognize, in the same way ProtiCelli's weights and vocabulary do. Each reference zip contains a `PROVENANCE.txt` recording its UniProt query, build date, and, for zips built after 2026-09-28, the UniProt release it was downloaded from.
 
 The weights file is not stored in git. See [Weights builds](#weights-builds) for released versions.
 
@@ -75,7 +80,7 @@ The weights file is not stored in git. See [Weights builds](#weights-builds) for
 ```bash
 python run_inference.py \
   --inputs inputs.json \
-  --weights_zip blast_proticelli_weights_v1.zip \
+  --weights_zip blast_proticelli_weights_v2.zip \
   --output_dir predictions/test_run
 ```
 
@@ -84,7 +89,7 @@ Optional arguments:
 | Argument | Default | Purpose |
 |---|---|---|
 | `--cell_line` | none | ProtiCelli cell line name applied to every record; omit to run without cell line conditioning |
-| `--seed` | none | Random seed for reproducible sampling |
+| `--seed` | none | Random seed; on Apple GPUs (MPS) results are near-identical, not bit-identical, across runs |
 | `--num_inference_steps` | 50 | Diffusion sampling steps |
 | `--batch_size` | 4 | ProtiCelli prediction batch size |
 | `--weights_dir` | `./weights` | Where model weights are extracted |
@@ -133,14 +138,14 @@ If every record returns `predictor_error`, the run fails, since that points to a
 ## Building the weights file
 
 1. Build the reference zips with `scripts/build_human_blast_db.sh` and `scripts/build_human_gene_map.sh` (usage in each script's header). Both pull from the current UniProt release, so rebuilding later produces different content; keep built zips rather than relying on rebuilding them.
-2. Obtain the ProtiCelli `checkpoint/` and `vae/` folders, for example by running ProtiCelli's `download_checkpoints()`, which fetches them from the Lundberg lab.
+2. Obtain the ProtiCelli `checkpoint/` and `vae/` folders, for example by running ProtiCelli's `download_checkpoints()`, which fetches them from the Lundberg lab. The build script packages only `checkpoint/unet`, `checkpoint/unet_ema`, and `vae`, and stops if any is missing.
 3. Assemble the weights file:
 
 ```bash
 scripts/build_weights_zip.sh proticelli \
   human_blast_db/human_blast_db.zip \
   human_gene_map/human_gene_map.zip \
-  blast_proticelli_weights_v1.zip
+  blast_proticelli_weights_v2.zip
 ```
 
 The script prints the top-level contents and the SHA-256 checksum. Record every build in the table below.
@@ -149,12 +154,14 @@ The script prints the top-level contents and the SHA-256 checksum. Record every 
 
 | Version | Built | UniProt release (date) | ProtiCelli weights | SHA-256 | Location | Notes |
 |---|---|---|---|---|---|---|
-| v1 | 2026-09-28 | 2026_03 (2026-09-02), inferred |  Lundberg lab default `download_checkpoints()` URLs | `19fc815a99449e80eb2c703602aa58a5c92103225efb8203dca738b9cd9c0566` | TBD | Verified end to end on two test records. Includes ProtiCelli training state files. UniProt release inferred: reference zips built 2026-09-23, when 2026_03 was current; not recorded by the v1 build scripts. |
+| v1 | 2026-09-28 | 2026_03 (2026-09-02), inferred |  Lundberg lab default `download_checkpoints()` URLs | `19fc815a99449e80eb2c703602aa58a5c92103225efb8203dca738b9cd9c0566` | TBD | Verified end to end on two test records. Includes ProtiCelli training state files (about 6.5 GB). UniProt release inferred: reference zips built 2026-09-23, when 2026_03 was current; not recorded by the v1 build scripts. |
+| v2 | 2026-09-28 | 2026_03 (2026-09-02) | Same as v1 | 2f243c8e0945b5b9830fafae1590c92638415501e7aa6c6db71da3161ed07071 | local only (not yet uploaded) | Training state removed. Otherwise same model weights as v1. |
 
 ## Open items
 
 - **Output pixel value range.** Inputs are normalized to roughly [-1, 1.5], but observed outputs fall in [0, 0.04]. Pending clarification from the Lundberg lab.
-- **Weights file size.** `checkpoint/` includes training state (`optimizer.bin`, `scheduler.bin`, `random_states_0.pkl`) that inference likely does not need. Excluding it could substantially reduce the 6.5 GB file; not yet tested.
+- **EMA weights.** ProtiCelli's `Model.model` loads `checkpoint/unet` (`_load_model()` defaults to `use_ema=False`), while its fine-tuning path loads `checkpoint/unet_ema`, and its `download.py` docstring lists only `unet_ema`. EMA weights are commonly the ones used for sampling in diffusion models, so whether inference should use them is a question for the Lundberg lab. Both folders are kept until then; dropping the unused one would save a further 1.7 GB.
+- **Reproducibility on Apple GPUs.** With a fixed seed, repeated runs on MPS differ by up to about 0.05% of the output range. Whether CUDA runs on Terra are bit-identical is untested.
 - **Handling of skipped records.** Skipping out-of-vocabulary proteins and failing only on all-error runs are provisional choices; how skipped records are scored is a challenge design question.
 - **`cell_line`.** Currently a single optional value applied to every record in a run.
 - **Containerization and WDL.** Docker image and WDL workflow in progress.

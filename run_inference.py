@@ -16,7 +16,8 @@ validated and filtered here.
 Everything the model needs at runtime ships in one weights zip
 (--weights_zip), built with scripts/build_weights_zip.sh:
     blast_proticelli_weights.zip
-        checkpoint/                     ProtiCelli model weights
+        checkpoint/unet/                ProtiCelli model weights (loaded for inference)
+        checkpoint/unet_ema/            ProtiCelli EMA weights (not currently loaded)
         vae/                            ProtiCelli VAE weights
         reference/human_blast_db.zip    from build_human_blast_db.sh
         reference/human_gene_map.zip    from build_human_gene_map.sh
@@ -48,6 +49,9 @@ STATUS_PREDICTOR_ERROR = "predictor_error"          # BLAST or mapping raised
 STATUS_NO_HIT = "no_blast_hit"                      # BLAST ran, returned nothing
 STATUS_NO_SYMBOL = "no_hgnc_symbol"                 # hit found, no HGNC symbol mapped
 STATUS_NOT_IN_VOCAB = "not_in_model_vocabulary"     # symbol unknown to ProtiCelli
+
+# The checkpoint subfolder ProtiCelli loads for inference (see load_weights).
+INFERENCE_WEIGHTS_SUBDIR = "unet"
 
 # Reference zips inside the weights zip (see module docstring).
 BLAST_DB_MEMBER = "reference/human_blast_db.zip"
@@ -145,6 +149,18 @@ def load_weights(weights_zip, weights_dir):
     for key, d in paths.items():
         if not Path(d).is_dir():
             raise FileNotFoundError(f"{key} not found at {d}; check the layout of {weights_zip}")
+
+    # ProtiCelli's Model._load_model() falls back to a randomly initialized
+    # model, with no error, when it finds no weights. Predictions would still
+    # be written and reported as successful. Require the folder inference
+    # actually loads: checkpoint/unet (Model.model calls _load_model() with
+    # the default use_ema=False, so checkpoint/unet_ema is not used).
+    model_weights = Path(paths["checkpoint_dir"]) / INFERENCE_WEIGHTS_SUBDIR
+    if not model_weights.is_dir():
+        raise FileNotFoundError(
+            f"{model_weights} not found; ProtiCelli would silently use random weights. "
+            f"Check the layout of {weights_zip}"
+        )
 
     # The reference zips are pulled out as-is; protein_predictor extracts them.
     with zipfile.ZipFile(weights_zip) as zf:
