@@ -3,6 +3,7 @@ protvs/checkpoint/
 protvs/vae/
 proticelli/checkpoint/
 proticelli/vae/
+weights/
 
 # Python
 __pycache__/
