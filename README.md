@@ -9,6 +9,18 @@ The pipeline has two stages:
 
 ProtiCelli uses a learned embedding for each protein it was trained on, so it can only predict proteins in its vocabulary (12,809 HGNC symbols in `proticelli/data/antibody_map.pkl`). Records whose protein falls outside that vocabulary are skipped and reported, not failed.
 
+```mermaid
+flowchart TD
+    A["Load input records<br/>(JSON from manifest_to_json.py)"] --> B["Extract weights file<br/>ProtiCelli weights, BLAST database, gene map"]
+    B --> C["Identify protein, per record<br/>FASTA to BLAST to UniProt to HGNC symbol"]
+    C --> D{"Symbol in ProtiCelli<br/>vocabulary?"}
+    D -- no --> E["Skip record<br/>status logged, no image"]
+    D -- yes --> F["ProtiCelli prediction<br/>batched over eligible records"]
+    F --> G["Save {prediction_id}.tiff"]
+    E --> H["Write prediction_results.tsv<br/>one row per input record"]
+    G --> H
+```
+
 This repository is a fork of ProtiCelli, developed by the Lundberg lab. The original documentation is in [`docs/PROTICELLI_README.md`](docs/PROTICELLI_README.md).
 
 ## Repository layout
@@ -24,6 +36,9 @@ This repository is a fork of ProtiCelli, developed by the Lundberg lab. The orig
 | `scripts/build_human_gene_map.sh` | Builds the reference gene map zip |
 | `scripts/build_weights_zip.sh` | Assembles the weights file from the model weights and reference zips |
 | `scripts/split_reference_channels.py` | Splits a multichannel reference image into single-channel files (test data preparation) |
+| `blast_proticelli.wdl` | WDL workflow wrapping `run_inference.py` for Terra or miniWDL |
+| `scripts/make_wdl_inputs.py` | Builds the WDL inputs JSON from the input records |
+| `manifest.tsv`, `test_image_reference_input/`, `test_fasta_reference_input/` | Two-record example: manifest, split reference images, and FASTA files |
 
 ## Inputs
 
@@ -54,6 +69,8 @@ python scripts/manifest_to_json.py manifest.tsv -o inputs.json
 ```
 
 Relative paths in the manifest are resolved against the manifest's directory by default, or against `--path-prefix` (for example a `gs://` bucket path on Terra).
+
+The repository includes a two-record example (`manifest.tsv`, `test_image_reference_input/`, `test_fasta_reference_input/`). The reference images are the ProtiCelli repository's `example_cell_reference_input` images (Lundberg lab), split into single-channel files with `scripts/split_reference_channels.py`. The two FASTA files are different ADK isoforms; both map to the same UniProt entry (P55263), at 100% identity over 362 residues and 99.4% over 343.
 
 ### Weights file
 
@@ -120,6 +137,36 @@ docker run --rm --platform linux/amd64 -v "$PWD":"$PWD" -w "$PWD" blast-proticel
 ```
 
 On a Mac this runs under emulation on the CPU and is slow; `--num_inference_steps 10` is useful for a quick functional test, though fewer steps give visibly rougher images.
+
+### With WDL
+
+`blast_proticelli.wdl` runs all records in one task, so the model loads once; splitting records across tasks is left to the caller. Records are declared as a WDL struct, so every image and FASTA file is a `File` that the workflow engine copies into the task.
+
+| Input | Type | Default |
+|---|---|---|
+| `records` | `Array[PredictionInput]` (the records described above) | required |
+| `weights_file` | `File` | required |
+| `docker` | `String` | required |
+| `cell_line` | `String?` | none |
+| `seed` | `Int?` | none |
+| `num_inference_steps` | `Int` | 50 |
+| `batch_size` | `Int` | 4 |
+
+Outputs are `predictions` (`Array[File]`, the TIFFs) and `prediction_results` (the TSV). Task resources default to Terra's g2-standard-8 (8 CPUs, 32 GiB, 75 GB SSD, one NVIDIA L4) and can be overridden as task inputs. Each run first logs `nvidia-smi` and whether PyTorch can use CUDA, so a silent fall back to the CPU shows at the top of the task log.
+
+To run locally with miniWDL:
+
+```bash
+python scripts/manifest_to_json.py manifest.tsv -o inputs.json
+python scripts/make_wdl_inputs.py \
+  --records inputs.json \
+  --weights_file blast_proticelli_weights_v2.zip \
+  --docker blast-proticelli:0.1.0 \
+  -o wdl_inputs.json
+MINIWDL__FILE_IO__OUTPUT_HARDLINKS=true miniwdl run blast_proticelli.wdl -i wdl_inputs.json
+```
+
+The environment variable makes miniWDL write outputs as ordinary files rather than symlinks; `_LAST/outputs.json` lists where they are. For Terra, generate the records with `--path-prefix gs://<bucket>/<folder>` and pass the weights file and Docker image by their bucket and registry addresses.
 
 ## Outputs
 
@@ -188,4 +235,4 @@ The script prints the top-level contents and the SHA-256 checksum. Record every 
 - **Handling of skipped records.** Skipping out-of-vocabulary proteins and failing only on all-error runs are provisional choices; how skipped records are scored is a challenge design question.
 - **`cell_line`.** Currently a single optional value applied to every record in a run.
 - **GPU driver on Terra.** The image's PyTorch is built for CUDA 13.0, which needs a recent NVIDIA driver (roughly 580 or newer). Terra's g2-standard-8 machines have NVIDIA L4 GPUs, which support it, but the driver version is set by the machine image and is unknown. With an older driver, PyTorch would silently fall back to the CPU. The first Terra run should confirm the device in use; if needed, pin PyTorch to a CUDA 12 build.
-- **WDL.** The workflow wrapper is the remaining step.
+- **Terra.** The workflow has run under miniWDL but not yet on Terra. That needs the Docker image pushed to a registry Terra can pull from, and the weights file and test inputs uploaded to the workspace bucket.
