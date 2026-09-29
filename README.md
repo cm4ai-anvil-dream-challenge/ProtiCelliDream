@@ -168,6 +168,8 @@ MINIWDL__FILE_IO__OUTPUT_HARDLINKS=true miniwdl run blast_proticelli.wdl -i wdl_
 
 The environment variable makes miniWDL write outputs as ordinary files rather than symlinks; `_LAST/outputs.json` lists where they are. For Terra, generate the records with `--path-prefix gs://<bucket>/<folder>` and pass the weights file and Docker image by their bucket and registry addresses.
 
+For a step-by-step run of the two-record example, see [docs/WORKED_EXAMPLE.md](docs/WORKED_EXAMPLE.md).
+
 ## Outputs
 
 All outputs are written flat into `--output_dir`:
