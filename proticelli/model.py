@@ -45,6 +45,13 @@ from .utils.download import download_checkpoints
 # Package root directory (where __init__.py lives)
 _PACKAGE_DIR = Path(__file__).resolve().parent
 
+# Identify available gpu devices
+def get_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 @dataclass
 class PredictionResult:
@@ -173,9 +180,10 @@ class Model:
     ):
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else _PACKAGE_DIR / "checkpoint"
         self.vae_dir = Path(vae_dir) if vae_dir else _PACKAGE_DIR / "vae"
-        self.device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        self.device = torch.device(device or get_device())
+#        self.device = torch.device(
+#            device or ("cuda" if torch.cuda.is_available() else "cpu")
+#        )
         self.dtype = _parse_dtype(dtype)
 
         # Lazy-loaded components
